@@ -20,15 +20,20 @@ type SubClient struct {
 	SubQoS     byte
 	KeepAlive  int
 	Quiet      bool
+	MsgCount   int
 }
 
-func (c *SubClient) run(res chan *SubResults, subDone chan bool, jobDone chan bool) {
+func (c *SubClient) run(res chan *SubResults, subDone chan bool) {
 	runResults := new(SubResults)
 	runResults.ID = c.ID
 
 	forwardLatency := []float64{}
+	receivedAllMsgs := make(chan bool, 1)
 
-	ka, _ := time.ParseDuration(strconv.Itoa(c.KeepAlive) + "s")
+	ka, err := time.ParseDuration(strconv.Itoa(c.KeepAlive) + "s")
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	opts := mqtt.NewClientOptions().
 		AddBroker(c.BrokerURL).
@@ -42,12 +47,18 @@ func (c *SubClient) run(res chan *SubResults, subDone chan bool, jobDone chan bo
 			i := 0
 			for ; i < len(payload)-3; i++ {
 				if payload[i] == '#' && payload[i+1] == '@' && payload[i+2] == '#' {
-					sendTime, _ := strconv.ParseInt(string(payload[:i]), 10, 64)
-					forwardLatency = append(forwardLatency, float64(recvTime-sendTime)/1000000) // in milliseconds
+					sendTime, err := strconv.ParseInt(string(payload[:i]), 10, 64)
+					if err != nil {
+						log.Fatal(err)
+					}
+					forwardLatency = append(forwardLatency, float64(recvTime-sendTime)/1_000_000) // in milliseconds
 					break
 				}
 			}
 			runResults.Received++
+			if runResults.Received == int64(c.MsgCount) {
+				receivedAllMsgs <- true
+			}
 		}).
 		SetConnectionLostHandler(func(client mqtt.Client, reason error) {
 			log.Printf("SUBSCRIBER %v lost connection to the broker: %v. Will reconnect...\n", c.ID, reason.Error())
@@ -76,7 +87,7 @@ func (c *SubClient) run(res chan *SubResults, subDone chan bool, jobDone chan bo
 	//加各项统计
 	for {
 		select {
-		case <-jobDone:
+		case <-receivedAllMsgs:
 			client.Disconnect(250)
 			runResults.FwdLatencyMin = stats.StatsMin(forwardLatency)
 			runResults.FwdLatencyMax = stats.StatsMax(forwardLatency)

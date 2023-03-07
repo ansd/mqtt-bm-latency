@@ -111,7 +111,10 @@ func (c *PubClient) pubMessages(in, out chan *Message, doneGen, donePub chan boo
 		}
 	}
 
-	ka, _ := time.ParseDuration(strconv.Itoa(c.KeepAlive) + "s")
+	ka, err := time.ParseDuration(strconv.Itoa(c.KeepAlive) + "s")
+	if err != nil {
+		log.Fatalf("PUBLISHER %v Error parsing keepalive: %v\n", c.ID, err)
+	}
 
 	opts := mqtt.NewClientOptions().
 		AddBroker(c.BrokerURL).

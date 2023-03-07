@@ -106,7 +106,6 @@ func main() {
 	//start subscribe
 
 	subResCh := make(chan *SubResults)
-	jobDone := make(chan bool)
 	subDone := make(chan bool)
 	subCnt := 0
 
@@ -124,8 +123,9 @@ func main() {
 			SubQoS:     byte(*subqos),
 			KeepAlive:  *keepalive,
 			Quiet:      *quiet,
+			MsgCount:   *count,
 		}
-		go sub.run(subResCh, subDone, jobDone)
+		go sub.run(subResCh, subDone)
 	}
 
 SUBJOBDONE:
@@ -171,18 +171,6 @@ SUBJOBDONE:
 	}
 	totalTime := time.Now().Sub(start)
 	pubtotals := calculatePublishResults(pubresults, totalTime)
-
-	for i := 0; i < 3; i++ {
-		time.Sleep(1 * time.Second)
-		if !*quiet {
-			log.Printf("Benchmark will stop after %v seconds.\n", 3-i)
-		}
-	}
-
-	// notify subscriber that job done
-	for i := 0; i < *clients; i++ {
-		jobDone <- true
-	}
 
 	// collect subscribe results
 	subresults := make([]*SubResults, *clients)
@@ -278,7 +266,11 @@ func printResults(pubresults []*PubResults, pubtotals *TotalPubResults, subresul
 			PubTotals: pubtotals,
 			SubTotals: subtotals,
 		}
-		data, _ := json.Marshal(jr)
+		data, err := json.Marshal(jr)
+		if err != nil {
+			log.Fatalf("Error marshalling JSON: %s", err)
+		}
+
 		var out bytes.Buffer
 		json.Indent(&out, data, "", "\t")
 
